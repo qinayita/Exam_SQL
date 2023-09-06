@@ -1,0 +1,109 @@
+ Rédiger les requêtes SQL suivante :
+
+○ Écrivez une requête SQL pour récupérer la liste de tous les clients avec une colonne
+supplémentaire indiquant si leur solde est faible (inférieur à 100 €), moyen (entre
+100 € et 500 €) ou élevé (supérieur à 500 €).
+
+SELECT nom, prenom, email, CASE WHEN credit < 100 THEN 'faible' WHEN credit BETWEEN 100 AND 500 THEN 'moyen' ELSE 'élevé' END AS niveau_solde FROM Utilisateur WHERE role = false;
+
+
+○ Écrivez une requête SQL pour récupérer la liste de toutes les annonces publicitaires
+avec les détails du client.
+
+SELECT Annonce.*, Utilisateur.nom, Utilisateur.prenom, Utilisateur.email FROM Annonce JOIN Utilisateur ON Annonce.id_utilisateur = Utilisateur.utilisateur_id WHERE Utilisateur.role = 0;
+
+
+○ Écrivez une requête SQL pour récupérer la liste des 5 derniers clients inscrits ayant
+un solde positif.
+
+SELECT * FROM Utilisateur WHERE credit > 0 ORDER BY utilisateur_id DESC LIMIT 5;
+
+
+○ Écrivez une requête SQL pour récupérer la liste de tous les arrêts de bus en indiquant
+leur zone associée
+
+SELECT Arret.arret_nom, Zone.zone_nom FROM Arret JOIN Zone ON Arret.id_zone = Zone.zone_id;
+
+
+○ Créez en SQL une table supplémentaire “log” qui permet de conserver les
+historiques d’action. Cette table devra être en relation avec la table client et contenir
+la date de l’action, le type d’action effectué ainsi qu’un message facultatif.
+
+CREATE TABLE log (
+  log_id INT AUTO_INCREMENT PRIMARY KEY,
+  id_utilisateur INT NOT NULL,
+  action_date DATETIME NOT NULL,
+  action_type VARCHAR(50) NOT NULL,
+  message VARCHAR(255),
+  FOREIGN KEY (utilisateur_id) REFERENCES utilisateur (utilisateur_id)
+);
+
+
+○ Ajoutez une colonne "last_update" à la table des annonces publicitaires, pour garder
+une trace de la date de la dernière mise à jour de chaque annonce.
+
+ALTER TABLE Annonce ADD COLUMN last_update DATETIME NOT NULL;
+
+
+○ Écrivez une procédure stockée pour insérer une nouvelle annonce publicitaire avec
+tous les détails nécessaires. Comme cette procédure doit écrire dans plusieurs
+tables, intégrez les différentes requêtes dans une transaction.
+
+CREATE PROCEDURE nouvelle_annonce( IN p_utilisateur_id INT, IN p_contenu TEXT, IN p_format BOOLEAN, IN p_chemin_fichier VARCHAR(255), IN p_date_creation DATETIME, IN p_statut VARCHAR(100), IN p_id_arret INT, IN p_date_debut_diffusion DATETIME, IN p_date_fin_diffusion DATETIME ) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END; START TRANSACTION; INSERT INTO Annonce (id_utilisateur, format, contenu, chemin_fichier, date_creation, statut) VALUES (p_utilisateur_id, p_format, p_contenu, p_chemin_fichier, p_date_creation, p_statut); SET @annonce_id = LAST_INSERT_ID(); INSERT INTO Diffusion (id_annonce, id_arret, date_debut_diffusion, date_fin_diffusion) VALUES (@annonce_id, p_id_arret, p_date_debut_diffusion, p_date_fin_diffusion); COMMIT; END;
+
+
+○ Créez une fonction pour calculer le coût total d'une annonce publicitaire en se
+basant sur la zone, les tranches horaires et le nombre de jours de diffusion.
+
+CREATE FUNCTION calcul_cout_total( p_zone_id INT, p_tranche_horaire_id INT, p_nombre_jours INT ) RETURNS DECIMAL(10,2) BEGIN DECLARE v_tarif DECIMAL(10,2); DECLARE v_tarif_id INT; SELECT tarif_id INTO v_tarif_id FROM Tarif WHERE zone_id = p_zone_id AND tranche_horaire_id = p_tranche_horaire_id; SELECT tarif_diffusion INTO v_tarif FROM Tarif WHERE tarif_id = v_tarif_id; RETURN v_tarif * p_nombre_jours; END;
+
+
+○ Créez une fonction “welcome” qui retourne le message “Bienvenue {{nom du
+client}}, votre dernière modification de campagne remonte au {{date au format de
+cet exemple : vendredi 12 mai 2023}}.”
+
+CREATE FUNCTION welcome(p_client_nom VARCHAR(100)) RETURNS VARCHAR(255) BEGIN DECLARE v_last_modification_date DATE; DECLARE v_message VARCHAR(255); -- Récupérer la dernière date de modification de campagne du client SELECT MAX(date_creation) INTO v_last_modification_date FROM Annonce WHERE id_utilisateur = (SELECT utilisateur_id FROM Utilisateur WHERE nom = p_client_nom); -- Formater la date au format souhaité (ex : vendredi 12 mai 2023) SET v_message = CONCAT('Bienvenue ', p_client_nom, ', votre dernière modification de campagne remonte au ', DATE_FORMAT(v_last_modification_date, '%W %e %M %Y'), '.'); RETURN v_message; END;
+
+
+○ Créez une procédure stockée pour ajouter un nouvel arrêt avec les informations
+nécessaires (nom de l'arrêt, zone, etc.).
+
+CREATE PROCEDURE AjouterArret( IN p_nom_arret VARCHAR(100), IN p_id_zone INT, IN p_adresse_ip VARCHAR(15) ) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END; START TRANSACTION; INSERT INTO Arret (arret_nom, id_zone, adresse_ip_raspberry) VALUES (p_nom_arret, p_id_zone, p_adresse_ip); COMMIT; END;
+
+
+○ Écrivez une requête préparée permettant d‘ajouter un nouveau client.
+
+PREPARE nouveau_client FROM 'INSERT INTO Utilisateur (nom, prenom, email) VALUES (?, ?, ?)';
+SET @nom = 'So';
+SET @prenom = 'Julia';
+SET @email = 'juso@gmail.com';
+EXECUTE nouveau_client USING @nom, @prenom, @email;
+DEALLOCATE PREPARE nouveau_client;
+
+
+○ Créez un Trigger qui ajoute une entrée dans la table log après chaque création d’une
+nouvelle campagne
+
+DELIMITER //
+CREATE TRIGGER annonce_trigger
+AFTER INSERT 
+ON annonce
+FOR EACH ROW
+BEGIN
+INSERT INTO log (action_date, action_type, id_utilisateur, message)
+VALUES (NOW(), "Nouvelle campagne ajoutée", NEW.id_utilisateur, NULL);
+END //
+
+DELIMITER ; 
+
+
+
+○ Créez une procédure stockée qui supprime toutes les données d’un client (son
+compte, ses campagnes, ses logs, …)
+
+CREATE PROCEDURE SupprimerClient(IN p_utilisateur_id INT) BEGIN DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END; START TRANSACTION; DELETE FROM annonce WHERE id_utilisateur = p_utilisateur_id; DELETE FROM log WHERE id_utilisateur = p_utilisateur_id; DELETE FROM utilisateur WHERE utilisateur_id = p_utilisateur_id; COMMIT; END;
+
+
+○ Créez une fonction qui retourne le nombre de campagnes en cours pour un client.
+
+CREATE FUNCTION nbr_campagnes_actives (p_utilisateur_id INT) RETURNS INT BEGIN DECLARE v_nbr_campagnes INT; SELECT COUNT(*) INTO v_nbr_campagnes FROM Annonce WHERE id_utilisateur = p_utilisateur_id AND statut = 'En cours'; RETURN v_nbr_campagnes; END;
